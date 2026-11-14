@@ -1,0 +1,256 @@
+import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { Near } from 'near-kit';
+import { InferenceClient } from '@nearai/inference-sdk/node';
+
+const required = [
+  'NEAR_AGENT_PRIVATE_KEY',
+  'NEAR_AGENT_ACCOUNT_ID',
+  'ORCHESTRA_NEAR_CONTRACT_ID',
+];
+for (const key of required) {
+  if (!process.env[key]) throw new Error('Missing required environment variable: ' + key);
+}
+
+const accountId = process.env.NEAR_AGENT_ACCOUNT_ID;
+const contractId = process.env.ORCHESTRA_NEAR_CONTRACT_ID;
+const executorUrl = process.env.AGENT_EXECUTOR_URL ? new URL(process.env.AGENT_EXECUTOR_URL) : null;
+if (executorUrl && executorUrl.protocol !== 'https:') {
+  throw new Error('AGENT_EXECUTOR_URL must use HTTPS.');
+}
+if (!executorUrl && !process.env.NEARAI_API_KEY) {
+  throw new Error('Set NEARAI_API_KEY for the built-in NEAR AI Cloud executor, or configure AGENT_EXECUTOR_URL for a custom executor.');
+}
+const nearAiBaseUrl = 'https://cloud-api.near.ai/v1';
+const nearAiModel = process.env.NEARAI_MODEL || 'z-ai/glm-5.3-flash';
+const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
+const agentPackagesDirectory = fileURLToPath(new URL('../../web/public/agents/', import.meta.url));
+const agentCatalog = JSON.parse(readFileSync(join(agentPackagesDirectory, 'catalog.json'), 'utf8'));
+const builtinAgents = new Map(agentCatalog.agents.map((agent) => {
+  if (!/^[a-z0-9-]+\/system-prompt\.md$/.test(agent.prompt_file)) {
+    throw new Error('Invalid prompt file path in agent catalog: ' + agent.id);
+  }
+  return [agent.id, {
+    ...agent,
+    system_prompt: readFileSync(join(agentPackagesDirectory, agent.prompt_file), 'utf8').trim(),
+  }];
+}));
+const near = new Near({
+  network: 'testnet',
+  privateKey: process.env.NEAR_AGENT_PRIVATE_KEY,
+  defaultSignerId: accountId,
+});
+const inference = executorUrl ? null : new InferenceClient({
+  apiKey: process.env.NEARAI_API_KEY,
+  baseUrl: nearAiBaseUrl + '/',
+  e2ee: true,
+});
+
+const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex');
+const activeJobs = new Set();
+
+function send(res, status, payload, origin) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': allowedOrigin === '*' ? '*' : allowedOrigin,
+    'Vary': 'Origin',
+  });
+  res.end(JSON.stringify(payload));
+}
+
+async function readJson(req, maxBytes = 16_384) {
+  let body = '';
+  for await (const chunk of req) {
+    body += chunk;
+    if (Buffer.byteLength(body, 'utf8') > maxBytes) {
+      throw new Error('Request body too large.');
+    }
+  }
+  return JSON.parse(body || '{}');
+}
+
+async function handleExecute(req, res) {
+  const origin = req.headers.origin || '';
+  if (origin && allowedOrigin !== '*' && origin !== allowedOrigin) {
+    return send(res, 403, { success: false, error: 'Origin not allowed.' }, origin);
+  }
+  if (!origin) {
+    const expectedToken = process.env.AGENT_DISPATCH_TOKEN;
+    if (!expectedToken || req.headers.authorization !== 'Bearer ' + expectedToken) {
+      return send(res, 401, { success: false, error: 'Server-to-server dispatch requires a valid bearer token.' }, origin);
+    }
+  }
+
+  let input;
+  try {
+    input = await readJson(req);
+  } catch (error) {
+    return send(res, 400, { success: false, error: error.message || 'Invalid JSON.' }, origin);
+  }
+
+  const jobId = Number(input.job_id);
+  const task = input.task;
+  const agentId = input.agent_id;
+  if (!Number.isSafeInteger(jobId) || jobId < 0 || typeof agentId !== 'string' || !agentId || typeof task !== 'string' || !task.trim() || task.length > 4_000) {
+    return send(res, 400, { success: false, error: 'job_id and task are required; task must be 1–4000 characters.' }, origin);
+  }
+
+  const taskHash = sha256(task);
+  if (input.task_hash !== taskHash) {
+    return send(res, 400, { success: false, error: 'Submitted task does not match its SHA-256 digest.' }, origin);
+  }
+
+  try {
+    const job = await near.view(contractId, 'get_job', { job_id: jobId });
+    if (!job) return send(res, 404, { success: false, error: 'On-chain job not found.' }, origin);
+    if (job.provider !== accountId) return send(res, 403, { success: false, error: 'This job belongs to a different provider account.' }, origin);
+    if (job.agent_id !== agentId) return send(res, 400, { success: false, error: 'Agent identifier does not match the on-chain job.' }, origin);
+    if (job.status !== 'PAID') return send(res, 409, { success: false, error: 'Job is not awaiting provider execution.' }, origin);
+    if (job.task_hash !== taskHash) return send(res, 400, { success: false, error: 'Task digest does not match the on-chain job.' }, origin);
+    const selectedAgent = builtinAgents.get(agentId) || null;
+
+    if (activeJobs.has(jobId)) {
+      return send(res, 409, { success: false, error: 'This job is already being processed by this provider instance.' }, origin);
+    }
+    activeJobs.add(jobId);
+    try {
+      let result;
+      if (executorUrl) {
+        // Custom provider-owned executor; its credentials stay on the provider's server.
+        const upstream = await fetch(executorUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(process.env.AGENT_EXECUTOR_TOKEN
+              ? { Authorization: 'Bearer ' + process.env.AGENT_EXECUTOR_TOKEN }
+              : {}),
+          },
+          body: JSON.stringify({
+            task,
+            job_id: jobId,
+            agent_id: agentId,
+            agent_account_id: accountId,
+            contract_id: contractId,
+            agent_package: selectedAgent ? {
+              id: selectedAgent.id,
+              name: selectedAgent.name,
+              description: selectedAgent.description,
+              system_prompt: selectedAgent.system_prompt,
+            } : null,
+          }),
+          signal: AbortSignal.timeout(45_000),
+        });
+        const upstreamText = await upstream.text();
+        if (Buffer.byteLength(upstreamText, 'utf8') > 100_000) {
+          return send(res, 502, { success: false, error: 'Agent executor response exceeded 100 KB.' }, origin);
+        }
+        if (!upstream.ok) {
+          console.error('[Orchestra Agent] Custom executor returned HTTP', upstream.status, 'for job', jobId);
+          return send(res, 502, { success: false, error: 'Agent executor failed with HTTP ' + upstream.status + '.' }, origin);
+        }
+        try {
+          result = JSON.parse(upstreamText);
+        } catch {
+          result = { output: upstreamText };
+        }
+      } else {
+        // The official SDK verifies Gateway/model evidence before inference,
+        // encrypts supported Chat fields to the attested model, and verifies
+        // the response signature before this result is accepted.
+        const completion = await inference.chat.completions.create({
+          model: nearAiModel,
+          temperature: 0.2,
+          max_tokens: 1600,
+          messages: [
+            {
+              role: 'system',
+              content: selectedAgent?.system_prompt || 'You are an autonomous specialist agent hired through Orchestra. Complete the buyer task accurately. Be explicit about uncertainty. Do not claim to have performed external actions unless you actually did them. Return a useful, structured answer.',
+            },
+            {
+              role: 'user',
+              content: task,
+            },
+          ],
+        }, { signal: AbortSignal.timeout(45_000) });
+        const verification = await inference.verifyResponse(completion.id);
+        if (verification.signatureKind !== 'provider_tee') {
+          throw new Error('NEAR AI response did not carry a verified provider TEE signature.');
+        }
+        const output = completion.choices?.[0]?.message?.content;
+        if (typeof output !== 'string' || !output.trim()) {
+          throw new Error('NEAR AI Cloud returned no assistant content.');
+        }
+        result = {
+          agent_id: agentId,
+          agent_name: selectedAgent?.name || 'Custom provider agent',
+          provider: 'NEAR AI Cloud',
+          model: completion.model || nearAiModel,
+          output,
+          usage: completion.usage || null,
+          verification: {
+            signature_kind: verification.signatureKind,
+            verified: true,
+            e2ee: true,
+          },
+        };
+      }
+      const resultHash = sha256(JSON.stringify(result));
+
+      await near.call(contractId, 'complete_job', {
+        job_id: jobId,
+        result_hash: resultHash,
+      }, { gas: '30 Tgas' });
+
+      console.log('[Orchestra Agent] Completed job', jobId, 'with result digest', resultHash);
+      return send(res, 200, {
+        success: true,
+        job_id: jobId,
+        result,
+        result_hash: resultHash,
+        chain_receipt: 'complete_job transaction submitted and finalized',
+      }, origin);
+    } finally {
+      activeJobs.delete(jobId);
+    }
+  } catch (error) {
+    console.error('[Orchestra Agent] Job execution failed:', error instanceof Error ? error.message : 'unknown error');
+    return send(res, 500, { success: false, error: 'Agent execution or on-chain completion failed.' }, origin);
+  }
+}
+
+const server = createServer(async (req, res) => {
+  const origin = req.headers.origin || '';
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': allowedOrigin === '*' ? '*' : allowedOrigin,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Max-Age': '600',
+      'Vary': 'Origin',
+    });
+    return res.end();
+  }
+
+  if (req.method === 'GET' && req.url === '/health') {
+    return send(res, 200, {
+      success: true,
+      service: 'orchestra-near-agent-provider',
+      account_id: accountId,
+      network: 'testnet',
+      built_in_agent_ids: [...builtinAgents.keys()],
+    }, origin);
+  }
+
+  if (req.method === 'POST' && req.url === '/v1/execute') {
+    return handleExecute(req, res);
+  }
+
+  return send(res, 404, { success: false, error: 'Route not found.' }, origin);
+});
+
+const port = Number(process.env.PORT || 8787);
+server.listen(port, () => console.log('[Orchestra Agent] Provider endpoint listening on port', port));

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "research-analyst",
+      "name": "Research Analyst",
+      "category": "Research",
+      "description": "Turns a question and supplied source material into a concise, evidence-led brief with clear citations and uncertainty notes.",
+      "capabilities": ["Source synthesis", "Evidence table", "Open questions"],
+      "prompt_file": "research-analyst/system-prompt.md"
+    },
+    {
+      "id": "contract-reviewer",
+      "name": "NEAR Contract Reviewer",
+      "category": "NEAR development",
+      "description": "Reviews supplied Rust or JavaScript contract code for access control, payment, storage, and state-transition risks.",
+      "capabilities": ["NEAR contract review", "Invariant checks", "Actionable findings"],
+      "prompt_file": "contract-reviewer/system-prompt.md"
+    },
+    {
+      "id": "data-analyst",
+      "name": "Data Analyst",
+      "category": "Data",
+      "description": "Explores supplied structured data, explains its shape, and returns a decision-ready summary without inventing unseen values.",
+      "capabilities": ["JSON and CSV analysis", "Trend summary", "Data quality notes"],
+      "prompt_file": "data-analyst/system-prompt.md"
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f5ec">
+  <title>Orchestra Browser Tools</title>
+  <style>
+    :root { color-scheme: light; --paper:#f8f5ec; --ink:#11110f; --muted:#68665f; --line:#151512; --yellow:#efff00; --purple:#d9b8ff; --green:#126b3b; --orange:#ff9a45; }
+    * { box-sizing:border-box; }
+    html { min-width:360px; background:var(--paper); }
+    body { min-width:360px; margin:0; background:var(--paper); color:var(--ink); font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    button, a { font:inherit; }
+    button:focus-visible, a:focus-visible { outline:3px solid #5d32a8; outline-offset:3px; }
+    .popup { width:min(100%, 440px); margin:0 auto; padding:17px; animation:arrive .35s cubic-bezier(.2,.8,.2,1) both; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 0 13px; border-bottom:2px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:10px; min-width:0; }
+    .mark { display:grid; place-items:center; width:36px; height:36px; flex:none; border:2px solid var(--line); background:var(--yellow); box-shadow:3px 3px 0 var(--line); font-size:21px; font-weight:1000; }
+    .brand-name { font-size:15px; font-weight:950; letter-spacing:-.055em; line-height:1; }
+    .brand-caption { margin-top:4px; color:var(--muted); font-size:9px; font-weight:750; letter-spacing:.13em; text-transform:uppercase; }
+    .dev-tag { border:1.5px solid var(--line); background:var(--purple); padding:5px 8px; font-size:9px; font-weight:900; letter-spacing:.08em; white-space:nowrap; }
+    .site-strip { display:flex; align-items:center; gap:8px; margin:14px 0; padding:9px 10px; border:1.5px solid var(--line); background:#fffdf7; box-shadow:2px 2px 0 var(--line); font-size:11px; }
+    .site-dot { width:8px; height:8px; flex:none; border:1px solid var(--line); border-radius:50%; background:#c7c4bb; }
+    .site-dot.on { background:#39bf68; box-shadow:0 0 0 3px #39bf6830; }
+    .site-name { overflow:hidden; flex:1; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
+    .site-state { color:var(--muted); font-size:9px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }
+    .balance-card { position:relative; overflow:hidden; padding:14px; border:2px solid var(--line); background:var(--yellow); box-shadow:4px 4px 0 var(--line); }
+    .balance-card::after { position:absolute; top:-35px; right:-28px; width:112px; height:112px; border:1.5px solid #11110f30; border-radius:50%; content:""; }
+    .eyebrow { position:relative; z-index:1; font-size:9px; font-weight:950; letter-spacing:.11em; text-transform:uppercase; }
+    .balance-line { position:relative; z-index:1; display:flex; align-items:baseline; gap:7px; margin:5px 0 12px; }
+    .balance { font-size:34px; font-weight:1000; letter-spacing:-.07em; line-height:1; font-variant-numeric:tabular-nums; }
+    .unit { font-size:12px; font-weight:900; }
+    .local-note { position:relative; z-index:1; margin-top:10px; color:#32331a; font-size:9px; line-height:1.45; }
+    .actions { position:relative; z-index:1; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .btn { min-height:37px; padding:8px 10px; border:2px solid var(--line); background:#fffdf7; box-shadow:2px 2px 0 var(--line); color:var(--ink); cursor:pointer; font-size:10px; font-weight:900; transition:transform .16s ease, box-shadow .16s ease, background .16s ease; }
+    .btn:hover:not(:disabled) { transform:translate(-1px,-1px); box-shadow:4px 4px 0 var(--line); }
+    .btn:active:not(:disabled) { transform:translate(2px,2px); box-shadow:none; }
+    .btn:disabled { cursor:wait; opacity:.65; }
+    .btn-dark { background:var(--ink); color:white; }
+    .btn-dark:hover:not(:disabled) { background:#33312b; }
+    .section { margin-top:20px; }
+    .section-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:8px; }
+    .section-title { font-size:12px; font-weight:1000; letter-spacing:-.035em; text-transform:uppercase; }
+    .count { color:var(--muted); font-size:9px; font-weight:850; text-align:right; }
+    .tool-list { display:grid; gap:7px; max-height:205px; margin:0; padding:0 2px 3px 0; overflow:auto; list-style:none; }
+    .tool { display:flex; align-items:center; gap:8px; padding:9px; border:1.5px solid var(--line); background:#fffdf7; box-shadow:2px 2px 0 var(--line); animation:arrive .25s ease both; }
+    .tool-icon { display:grid; place-items:center; width:31px; height:31px; flex:none; border:1.5px solid var(--line); background:var(--purple); font-size:13px; font-weight:1000; }
+    .tool-copy { min-width:0; flex:1; }
+    .tool-title { overflow:hidden; font-size:10px; font-weight:900; text-overflow:ellipsis; white-space:nowrap; }
+    .tool-name { margin-top:3px; overflow:hidden; color:var(--muted); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:8px; text-overflow:ellipsis; white-space:nowrap; }
+    .tool-status { flex:none; padding:4px 5px; border:1px solid var(--line); background:#e4f4e8; color:#145a31; font-size:8px; font-weight:950; text-transform:uppercase; }
+    .tool-status.unsupported { background:#f1eee5; color:#65625b; }
+    .empty { padding:13px; border:1.5px dashed #77746b; color:var(--muted); font-size:10px; line-height:1.5; text-align:center; }
+    .runner { margin-top:13px; padding:11px; border:1.5px solid var(--line); background:var(--purple); box-shadow:3px 3px 0 var(--line); }
+    .runner-label { display:block; margin-bottom:6px; font-size:9px; font-weight:950; letter-spacing:.08em; text-transform:uppercase; }
+    .runner-select, .runner-args { width:100%; border:1.5px solid var(--line); border-radius:0; background:#fffdf7; color:var(--ink); font:10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .runner-select { height:34px; padding:0 8px; font-weight:800; }
+    .runner-args { display:block; min-height:58px; margin-top:7px; padding:8px; resize:vertical; line-height:1.4; }
+    .runner-help { margin-top:5px; color:#494052; font-size:9px; line-height:1.4; }
+    .runner-actions { display:flex; align-items:center; gap:8px; margin-top:8px; }
+    .runner-actions .btn { flex:1; }
+    .result { max-height:125px; margin:9px 0 0; padding:8px; overflow:auto; border:1px solid var(--line); background:#fffdf7; font:9px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .result[hidden] { display:none; }
+    .notice { min-height:15px; margin-top:9px; color:var(--muted); font-size:9px; line-height:1.4; }
+    .notice.error { color:#a22920; font-weight:800; }
+    .footer { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:15px; padding-top:11px; border-top:2px solid var(--line); }
+    .footer-link { padding:8px 5px; border:1.5px solid var(--line); background:#fffdf7; box-shadow:2px 2px 0 var(--line); color:var(--ink); font-size:9px; font-weight:900; text-align:center; text-decoration:none; transition:transform .16s ease, box-shadow .16s ease; }
+    .footer-link:hover { transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--line); }
+    @keyframes arrive { from { opacity:0; transform:translateY(7px); } to { opacity:1; transform:translateY(0); } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms!important; transition-duration:.01ms!important; scroll-behavior:auto!important; } }
+  </style>
+</head>
+<body>
+  <main class="popup">
+    <header class="topbar">
+      <div class="brand"><div class="mark" aria-hidden="true">O</div><div><div class="brand-name">ORCHESTRA</div><div class="brand-caption">Browser tools</div></div></div>
+      <span class="dev-tag">LOCAL DEMO</span>
+    </header>
+
+    <div class="site-strip" aria-live="polite"><span class="site-dot" id="site-dot"></span><span class="site-name" id="site-name">Checking active tab…</span><span class="site-state" id="site-state">—</span></div>
+
+    <section class="balance-card" aria-label="Local demo credit balance">
+      <div class="eyebrow">Browser demo balance · not NEAR</div>
+      <div class="balance-line"><span class="balance" id="wallet-display">0.00</span><span class="unit">demo CR</span></div>
+      <div class="actions"><button class="btn btn-dark" id="btn-enable" type="button">Enable on this site</button><button class="btn" id="btn-refill" type="button">+50 demo CR</button></div>
+      <p class="local-note">Stored in this browser only. Separate from your NEAR wallet and the app credit ledger.</p>
+    </section>
+
+    <section class="section" aria-labelledby="tools-heading">
+      <div class="section-head"><h1 class="section-title" id="tools-heading">Synced agents</h1><span class="count" id="tool-count">0 tools</span></div>
+      <ul class="tool-list" id="tool-list"><li class="empty">Loading synced tools…</li></ul>
+      <div class="notice" id="notice" role="status" aria-live="polite"></div>
+      <button class="btn" id="btn-refresh" type="button" style="width:100%;margin-top:7px">Refresh active page</button>
+
+      <div class="runner" aria-label="Try a synced browser agent">
+        <label class="runner-label" for="runner-tool">Try an agent on this page</label>
+        <select class="runner-select" id="runner-tool" aria-label="Choose an agent"><option value="">No supported agents synced</option></select>
+        <textarea class="runner-args" id="runner-args" spellcheck="false" aria-label="Agent arguments as JSON" placeholder="{}">{}</textarea>
+        <div class="runner-help" id="runner-help">Enter JSON arguments matching the selected agent's schema.</div>
+        <div class="runner-actions"><button class="btn btn-dark" id="btn-run" type="button" disabled>Run agent</button></div>
+        <pre class="result" id="runner-result" aria-live="polite" hidden></pre>
+      </div>
+    </section>
+
+    <nav class="footer" aria-label="Orchestra links">
+      <a href="http://localhost:3000/marketplace" data-app-route="/marketplace" target="_blank" rel="noreferrer" class="footer-link">Marketplace</a>
+      <a href="http://localhost:3000/dashboard" data-app-route="/dashboard" target="_blank" rel="noreferrer" class="footer-link">Credit ledger</a>
+      <a href="http://localhost:3000/docs" data-app-route="/docs" target="_blank" rel="noreferrer" class="footer-link">Docs</a>
+    </nav>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

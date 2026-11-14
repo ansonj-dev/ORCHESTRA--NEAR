@@ -1,0 +1,83 @@
+name: Orchestra WebMCP CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Validate Chrome Extension Structure
+        run: |
+          echo "Validating Chrome Extension Manifest V3..."
+          test -f extension/manifest.json
+          test -f extension/background.js
+          test -f extension/content.js
+          test -f extension/popup.html
+          echo "Extension verification passed."
+
+      - name: Install Web Dependencies
+        working-directory: ./web
+        run: npm ci
+
+      - name: Build Web Application
+        working-directory: ./web
+        run: npm run build
+
+  contract-build:
+    name: Build NEAR contract WASM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust WASM target
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+
+      - name: Install cargo-near
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build contract
+        working-directory: contracts/orchestra
+        run: cargo near build non-reproducible-wasm --out-dir artifacts
+
+      - name: Verify WASM artifact
+        run: |
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          artifact = Path("contracts/orchestra/artifacts/orchestra_near_contract.wasm")
+          data = artifact.read_bytes()
+          assert data[:8] == b"\0asm\1\0\0\0", "artifact is not a valid WebAssembly v1 module"
+          print(f"Artifact: {artifact}")
+          print(f"Size: {len(data)} bytes")
+          print(f"SHA-256: {sha256(data).hexdigest()}")
+          PY
+
+      - name: Upload contract artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestra-near-testnet-contract
+          path: contracts/orchestra/artifacts/orchestra_near_contract.wasm
+          if-no-files-found: error
+          retention-days: 7

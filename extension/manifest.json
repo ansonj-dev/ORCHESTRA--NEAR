@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Orchestra Browser Tools (Development)",
+  "version": "1.0.0",
+  "description": "Development extension for syncing and trying Orchestra browser tools with a local demo ledger.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://orchestra-web-gmvv.onrender.com/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Orchestra Browser Tools (Development)"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://orchestra-web-gmvv.onrender.com/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ]
+}
