@@ -8,7 +8,9 @@ const TARGETS = [
   'h1', 'h2', 'section', 'article', 'form', 'table', 'pre',
   '[class*="rounded-2xl"][class*="border"]', '[class*="rounded-xl"][class*="border"]',
   '.tool-grid > *', '.starter-agent-card', '.agent-type-card', '.capability-card',
-  '[data-reveal]',
+  '[data-reveal]', '.home-grid > *', '.feature', '.metric', '.crisis',
+  '.flow-step', '.recent-card', '.stat', '.cta-block', '.section-head',
+  '.band', '.economy-stat', '.bottom-cta', '.tool-card',
 ].join(',');
 
 export default function ScrollMotion() {
@@ -20,13 +22,14 @@ export default function ScrollMotion() {
     if (!root || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     const seen = new WeakSet<Element>();
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) return;
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
         const el = entry.target as HTMLElement;
         el.classList.add('is-visible');
         observer.unobserve(el);
-        // Clear transforms afterwards so fixed-position modals are never trapped.
         const done = () => el.classList.add('reveal-done');
         el.addEventListener('animationend', done, { once: true });
         window.setTimeout(done, 1400);
@@ -41,7 +44,11 @@ export default function ScrollMotion() {
         if (!el.hasAttribute('data-reveal')) {
           el.setAttribute('data-reveal', el.matches('h1, h2') ? 'up' : VARIANTS[index % VARIANTS.length]);
         }
-        if (!el.hasAttribute('data-reveal-delay')) el.style.animationDelay = `${(index % 4) * 70}ms`;
+        if (!el.hasAttribute('data-reveal-delay')) el.style.animationDelay = `${(index % 6) * 75}ms`;
+        if (!el.dataset.reveal) {
+          const inGrid = Boolean(el.parentElement?.matches('.grid, .tool-grid, .home-grid, .metrics, .crisis-grid, .recent-grid'));
+          el.dataset.reveal = el.matches('h1, h2, .section-head') ? 'left' : inGrid ? VARIANTS[index % 2 === 0 ? 1 : 0] : VARIANTS[index % VARIANTS.length];
+        }
         index += 1;
         observer.observe(el);
       });
@@ -50,7 +57,6 @@ export default function ScrollMotion() {
     const mutations = new MutationObserver(tag);
     mutations.observe(root, { childList: true, subtree: true });
 
-    // Pointer parallax for illustrated layers.
     const layers = () => document.querySelectorAll<HTMLElement>('[data-parallax]');
     const onMove = (event: PointerEvent) => {
       const x = event.clientX / window.innerWidth - 0.5;
@@ -63,10 +69,27 @@ export default function ScrollMotion() {
     };
     window.addEventListener('pointermove', onMove, { passive: true });
 
+    let scrollFrame = 0;
+    const onScroll = () => {
+      if (scrollFrame) return;
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0;
+        const y = window.scrollY;
+        layers().forEach((layer) => {
+          const depth = Number(layer.dataset.parallax || 0.1);
+          layer.style.setProperty('--scroll-y', `${Math.round(y * depth * -1)}px`);
+        });
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
     return () => {
       mutations.disconnect();
       observer.disconnect();
       window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('scroll', onScroll);
+      if (scrollFrame) cancelAnimationFrame(scrollFrame);
     };
   }, [pathname]);
 
