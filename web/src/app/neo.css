@@ -215,3 +215,28 @@ html.motion-ready [data-reveal].reveal-done { opacity: 1 !important; transform: 
   .splash { display: none; }
   html.motion-ready [data-reveal] { opacity: 1 !important; transform: none !important; animation: none !important; }
 }
+
+
+/* Restored motion details from the original Orchestra interface. These are
+   additive: the current NEAR pages, splash variants and navigation stay intact. */
+[data-parallax] { translate: var(--px, 0px) calc(var(--py, 0px) + var(--scroll-y, 0px)); will-change: transform, translate; }
+.marquee-track { will-change: transform; }
+.marquee b, .marquee .star, .marquee-row b { display: inline-block; animation: orchestra-star-spin 6s linear infinite; }
+.home-marquees .marquee:nth-child(even) .marquee-track { animation-direction: reverse; }
+.hero-art .float-card, .hero-art .computer, .hero-art .art-splash { will-change: transform; }
+.hero-art .float-agents { animation: orchestra-float 5.2s ease-in-out infinite; }
+.hero-art .float-near { animation: orchestra-float 4.6s ease-in-out -1.4s infinite; }
+.hero-art .float-code { animation: orchestra-float 5.8s ease-in-out -2.2s infinite; }
+.hero-art .art-splash { animation: orchestra-splash-drift 8s ease-in-out infinite alternate; }
+.hero-art .spark { transform-origin: center; }
+.capability-card, .starter-agent-card, .tool-card, .economy-stat, .bottom-cta { transition: transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease; }
+.capability-card:hover, .starter-agent-card:hover, .tool-card:hover { transform: translate(-4px,-5px) rotate(-.35deg); }
+.site-header { transition: box-shadow .2s ease, background-color .2s ease; }
+.site-header.is-scrolled { box-shadow: 0 5px 0 var(--ink); }
+@keyframes orchestra-star-spin { to { transform: rotate(360deg); } }
+@keyframes orchestra-float { 0%,100% { translate: 0 0; } 50% { translate: 0 -12px; } }
+@keyframes orchestra-splash-drift { from { transform: rotate(-2deg) scale(1); } to { transform: rotate(2deg) scale(1.055); } }
+@media (prefers-reduced-motion: reduce) {
+  [data-parallax], .hero-art .float-agents, .hero-art .float-near, .hero-art .float-code,
+  .hero-art .art-splash, .marquee b, .marquee .star, .marquee-row b { animation: none !important; translate: none !important; }
+}
